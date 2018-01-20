@@ -1,6 +1,0 @@
-import Text.ParserCombinators.Parsec
-
-func01 v1 = parse anyChar "" v1
-
-
-
