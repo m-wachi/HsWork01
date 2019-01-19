@@ -47,41 +47,19 @@ remove2Quote cs =
 
 main = do
   fileContents <- readFile "result-h2.csv"
-  let lineData = lines fileContents
-  print (head lineData)
-  print "---"
-  print (tail lineData)
-  print "---"
-  let l2Data = head $ tail lineData
-  let (col1, _) = break (== ',') l2Data
-  print col1
-  print "---"
-  let cols = splitComma l2Data
-  print cols
-  print "---"
-  let col1a = remove2Quote col1
-  print col1a
-  let cols2 = map remove2Quote cols
-  print cols2
-  print "---"
+  let lineData = tail $ lines fileContents
   let f1 = (map remove2Quote) . splitComma
-  let cols3 = f1 l2Data
-  print cols3
-  print "---"
-  let sn1 = getSalesNum cols3
-  print sn1
-  print "---"
   let lineData2 = map f1 lineData
-  print lineData2
-  let salesNums = map getSalesNum $ tail lineData2
-  print salesNums
-  print "---"
+  -- print lineData2
+  let salesNums = map getSalesNum $ lineData2
+  -- print "---"
+  --print salesNums
   conn <- PgHDBC.connectPostgreSQL "host='localhost' dbname='user01db' user='user01' password='user01'"
   -- insRecord conn sn1
   d <- mapM (insTSalesNum conn) salesNums -- use mapM if function is Action(IO Monad)
   HDBC.commit conn
-  res <- HDBC.quickQuery conn "select * from t_sales_num01" []
-  putStrLn $ show res
+  -- res <- HDBC.quickQuery conn "select * from t_sales_num01" []
+  -- putStrLn $ show res
   HDBC.disconnect conn
 
 
