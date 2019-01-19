@@ -3,19 +3,29 @@ import qualified Database.HDBC.PostgreSQL as PgHDBC
 import qualified Data.Time.Calendar as Cal
 import qualified Data.Time.Calendar.WeekDate as CalWD -- package time-1.6.0.1
 
--- insRecord :: PgHDBC.Connection -> Cal.Day -> IO Integer
--- insRecord conn dayVal = do
---   let dn = Cal.toModifiedJulianDay dayVal
---   -- dow: 1:Mon, 2:Tue ... 7:Sun
---   let (_, _, dow) = CalWD.toWeekDate dayVal
---   -- print dow
---   let tmp = (dn - 4 - (fromIntegral dow)) :: Integer
---   let wn = tmp `div` (7::Integer) 
---   -- print wn
---   -- let downum = CalW.fromEnum dow
---   HDBC.run conn "insert into t_date values(?, ?, ?, ?)"
---     [HDBC.toSql dayVal, HDBC.toSql dn, HDBC.toSql wn, HDBC.toSql dow]
+data SalesNum = SalesNum {
+  snDeliveryDate :: Int,
+  snCustomerCode :: Int,
+  snStoreCd :: Int,
+  snMercCd :: Int,
+  snQuantity :: Int
+  } deriving (Show)
 
+
+getSalesNum :: [String] -> SalesNum
+getSalesNum [sDeliveryDate, sCustomerCode, sStoreCd, sMercCd, sQuantity] =
+  SalesNum (read sDeliveryDate) (read sCustomerCode) (read sStoreCd) (read sMercCd) (read sQuantity)
+
+                                
+insTSalesNum :: PgHDBC.Connection -> SalesNum -> IO Integer
+insTSalesNum conn salesNum = do
+  let sqlDeliveryDate = HDBC.toSql $ snDeliveryDate salesNum
+  let sqlCustomerCd = HDBC.toSql $ snCustomerCode salesNum
+  let sqlStoreCd = HDBC.toSql $ snStoreCd salesNum
+  let sqlMercCd = HDBC.toSql $ snMercCd salesNum
+  let sqlQuantity = HDBC.toSql $ snQuantity salesNum
+  HDBC.run conn "insert into t_sales_num01 values(?, ?, ?, ?, ?)"
+    [sqlDeliveryDate, sqlCustomerCd, sqlStoreCd, sqlMercCd, sqlQuantity]
 
 -- genDayList :: Cal.Day -> Cal.Day -> [Cal.Day]
 -- genDayList from to =
@@ -36,8 +46,6 @@ remove2Quote cs =
     cs2 = if '"' == head cs then tail cs else cs
 
 main = do
-  -- conn <- PgHDBC.connectPostgreSQL "host='localhost' dbname='user01db' user='user01' password='user01'"
-
   fileContents <- readFile "result-h2.csv"
   let lineData = lines fileContents
   print (head lineData)
@@ -60,23 +68,21 @@ main = do
   let cols3 = f1 l2Data
   print cols3
   print "---"
+  let sn1 = getSalesNum cols3
+  print sn1
+  print "---"
   let lineData2 = map f1 lineData
   print lineData2
-  {-
-  let a = Cal.fromGregorian 2015 1 1
-  print a
-  let b = Cal.fromGregorian 2015 1 10
-  print b
-  let c = genDayList a b
-  -- print c
-  let f1 = insRecord conn
-  d <- mapM (insRecord conn) c -- use mapM if function is Action(IO Monad)
-  -}
-  -- print d
-  -- HDBC.commit conn
-  -- res <- HDBC.quickQuery conn "select * from t_date" []
-  -- putStrLn $ show res
-  -- HDBC.disconnect conn
+  let salesNums = map getSalesNum $ tail lineData2
+  print salesNums
+  print "---"
+  conn <- PgHDBC.connectPostgreSQL "host='localhost' dbname='user01db' user='user01' password='user01'"
+  -- insRecord conn sn1
+  d <- mapM (insTSalesNum conn) salesNums -- use mapM if function is Action(IO Monad)
+  HDBC.commit conn
+  res <- HDBC.quickQuery conn "select * from t_sales_num01" []
+  putStrLn $ show res
+  HDBC.disconnect conn
 
 
   
