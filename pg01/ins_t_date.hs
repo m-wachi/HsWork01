@@ -31,9 +31,9 @@ convDay2N8 dayVal =
 
 main = do
   conn <- PgHDBC.connectPostgreSQL "host='localhost' dbname='user01db' user='user01' password='user01'"
-  let a = Cal.fromGregorian 2015 1 1
+  let a = Cal.fromGregorian 2016 1 1
   print a
-  let b = Cal.fromGregorian 2015 1 10
+  let b = Cal.fromGregorian 2019 12 31
   print b
   let c = genDayList a b
   -- print c
