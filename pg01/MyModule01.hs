@@ -45,23 +45,23 @@ dateNum2N8 dateNum
   タプルをSalesNumWeekに変換
 -}
 fromTpl2SNW :: (Int, Int, Int, Int, Int, Int, Int, Int) -> SalesNumWeek
-fromTpl2SNW (ddn8, dd, cc, sc, mc, qt, dnMon, dow)
-  | dow == 1 = SalesNumWeek ddn8 dnMon cc sc mc qt 0 0 0 0 0 0
-  | dow == 2 = SalesNumWeek ddn8 dnMon cc sc mc qt 0 0 0 0 0 0
-  | dow == 3 = SalesNumWeek ddn8 dnMon cc sc mc qt 0 0 0 0 0 0
-  | dow == 4 = SalesNumWeek ddn8 dnMon cc sc mc 0 0 0 qt 0 0 0
-  | dow == 5 = SalesNumWeek ddn8 dnMon cc sc mc 0 0 0 0 qt 0 0
-  | dow == 6 = SalesNumWeek ddn8 dnMon cc sc mc 0 0 0 0 0 qt 0
-  | dow == 7 = SalesNumWeek ddn8 dnMon cc sc mc 0 0 0 0 0 0 qt
+fromTpl2SNW (ddMonN8, dd, cc, sc, mc, qt, dnMon, dow)
+  | dow == 1 = SalesNumWeek ddMonN8 dnMon cc sc mc qt 0 0 0 0 0 0
+  | dow == 2 = SalesNumWeek ddMonN8 dnMon cc sc mc qt 0 0 0 0 0 0
+  | dow == 3 = SalesNumWeek ddMonN8 dnMon cc sc mc qt 0 0 0 0 0 0
+  | dow == 4 = SalesNumWeek ddMonN8 dnMon cc sc mc 0 0 0 qt 0 0 0
+  | dow == 5 = SalesNumWeek ddMonN8 dnMon cc sc mc 0 0 0 0 qt 0 0
+  | dow == 6 = SalesNumWeek ddMonN8 dnMon cc sc mc 0 0 0 0 0 qt 0
+  | dow == 7 = SalesNumWeek ddMonN8 dnMon cc sc mc 0 0 0 0 0 0 qt
 
 {-
   レコードデータをタプルに変換
 -}
 fromSql2Tpl :: [HDBC.SqlValue] -> (Int, Int, Int, Int, Int, Int, Int, Int)
 fromSql2Tpl [dd, cc, sc, mc, qt, dn, wn, dow]
-    = (ddn8, dd2, cc2, sc2, mc2, qt2, dnMon, dow2)
+    = (ddMonN8, dd2, cc2, sc2, mc2, qt2, dnMon, dow2)
   where
-    ddn8 = dateNum2N8 dd2
+    ddMonN8 = dateNum2N8 dnMon
     dd2 = (truncate $ fromRational $ HDBC.fromSql dd) :: Int
     cc2 = (truncate $ fromRational $ HDBC.fromSql cc) :: Int
     sc2 = (truncate $ fromRational $ HDBC.fromSql sc) :: Int
@@ -115,4 +115,21 @@ mergeSNW snw1 snw2
 
 accumSNW :: [SalesNumWeek] -> SalesNumWeek
 accumSNW snws = foldr mergeSNW (head snws) $ tail snws
+
+insTSalesNumWeek :: PgHDBC.Connection -> SalesNumWeek -> IO Integer
+insTSalesNumWeek conn salesNumWeek = do
+  let sqlDlvDateNMon = HDBC.toSql $ snwDlvDateMonN8 salesNumWeek
+  let sqlCustomerCd = HDBC.toSql $ snwCustomerCode salesNumWeek
+  let sqlStoreCd = HDBC.toSql $ snwStoreCd salesNumWeek
+  let sqlMercCd = HDBC.toSql $ snwMercCd salesNumWeek
+  let sqlQtyMon = HDBC.toSql $ snwQtyMon salesNumWeek
+  let sqlQtyTue = HDBC.toSql $ snwQtyTue salesNumWeek
+  let sqlQtyWed = HDBC.toSql $ snwQtyWed salesNumWeek
+  let sqlQtyThu = HDBC.toSql $ snwQtyThu salesNumWeek
+  let sqlQtyFri = HDBC.toSql $ snwQtyFri salesNumWeek
+  let sqlQtySat = HDBC.toSql $ snwQtySat salesNumWeek
+  let sqlQtySun = HDBC.toSql $ snwQtySun salesNumWeek
+  HDBC.run conn "insert into t_sales_num02 values(?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    [sqlDlvDateNMon, sqlCustomerCd, sqlStoreCd, sqlMercCd,
+     sqlQtyMon, sqlQtyTue, sqlQtyWed, sqlQtyThu, sqlQtyFri, sqlQtySat, sqlQtySun]
 

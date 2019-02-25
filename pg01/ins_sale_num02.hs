@@ -7,11 +7,6 @@ import qualified MyModule01 as MyM1
 
 
 {-
-getSalesNum :: [String] -> SalesNum
-getSalesNum [sDeliveryDate, sCustomerCode, sStoreCd, sMercCd, sQuantity] =
-  SalesNum (read sDeliveryDate) (read sCustomerCode) (read sStoreCd) (read sMercCd) (read sQuantity)
-
-                                
 insTSalesNum :: PgHDBC.Connection -> SalesNum -> IO Integer
 insTSalesNum conn salesNum = do
   let sqlDeliveryDate = HDBC.toSql $ snDeliveryDate salesNum
@@ -22,24 +17,7 @@ insTSalesNum conn salesNum = do
   HDBC.run conn "insert into wk_sales_num01 values(?, ?, ?, ?, ?)"
     [sqlDeliveryDate, sqlCustomerCd, sqlStoreCd, sqlMercCd, sqlQuantity]
 -}
--- genDayList :: Cal.Day -> Cal.Day -> [Cal.Day]
--- genDayList from to =
---   takeWhile (<= to) $ iterate succ from
-{-
-splitComma :: String -> [String]
-splitComma "" = [""]
-splitComma s
-  | b == "" = [a]
-  | otherwise = a : (splitComma $ tail b)
-  where
-    (a, b) = break (== ',') s
 
-remove2Quote :: String -> String
-remove2Quote cs = 
-    if '"' == (last cs2) then init cs2 else cs2
-  where
-    cs2 = if '"' == head cs then tail cs else cs
--}
 
 main = do
   conn <- PgHDBC.connectPostgreSQL "host='localhost' dbname='user01db' user='user01' password='user01'"
@@ -73,13 +51,14 @@ main = do
   print (MyM1.isSameGroup01 snw1 snw2)
   print "---"
   let res20 = take 20 res
-  print res20
-  print "---"
+  -- print res20
+  -- print "---"
   let snws20 = map MyM1.fromSql2SNW res20
   print snws20
   let (pa1, pa2) = span (MyM1.isSameGroup01 snw1) snws20
   print pa1
   print "---"
+  {-
   let snwgs = MyM1.splitGroup01 [] snws20
   let snwgs1 = head snwgs
   let snwgs2 = head $ tail snwgs
@@ -91,8 +70,18 @@ main = do
   print $ MyM1.accumSNW snwgs1
   print $ MyM1.accumSNW snwgs2
   print "---"
+  -}
+  let snws = map MyM1.fromSql2SNW res
+  let snwgs = MyM1.splitGroup01 [] snws
   let snws2 = map MyM1.accumSNW snwgs
   print snws2
+  print "---"
+  -- print $ MyM1.dateNum2N8 (58419 :: Int)
+  -- print $ MyM1.snwDlvDateMonN8 snw1
+  --MyM1.insTSalesNumWeek conn snw1
+  d <- mapM (MyM1.insTSalesNumWeek conn) snws2 -- use mapM if function is Action(IO Monad)
+  print d
+  HDBC.commit conn
   HDBC.disconnect conn
 
   {-
@@ -106,7 +95,4 @@ main = do
   --print salesNums
   -}
   -- insRecord conn sn1
-  --d <- mapM (insTSalesNum conn) salesNums -- use mapM if function is Action(IO Monad)
-  -- HDBC.commit conn
-
   
