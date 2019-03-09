@@ -2,97 +2,81 @@ import qualified Database.HDBC as HDBC
 import qualified Database.HDBC.PostgreSQL as PgHDBC
 import qualified Data.Time.Calendar as Cal
 import qualified Data.Time.Calendar.WeekDate as CalWD -- package time-1.6.0.1
-
+import qualified System.Environment as SysEnv
+import qualified System.Exit as SysExit
 import qualified MyModule01 as MyM1
 
 
+batchInsTSNW :: PgHDBC.Connection -> [MyM1.SalesNumWeek] -> IO Integer
+batchInsTSNW conn snws = do
+  let snwsTake = take 500 snws
+  let snwsLeft = drop 500 snws
+  if 0 == (length snwsTake) then return 0
+  else do
+    d <- mapM (MyM1.insTSalesNumWeek conn) snwsTake -- use mapM if function is Action(IO Monad)
+    -- print $ sum d
+    let cnt = sum d
+    putStr "."
+    HDBC.commit conn
+    cnt2 <- batchInsTSNW conn snwsLeft
+    return $ cnt + cnt2
+
 {-
-insTSalesNum :: PgHDBC.Connection -> SalesNum -> IO Integer
-insTSalesNum conn salesNum = do
-  let sqlDeliveryDate = HDBC.toSql $ snDeliveryDate salesNum
-  let sqlCustomerCd = HDBC.toSql $ snCustomerCode salesNum
-  let sqlStoreCd = HDBC.toSql $ snStoreCd salesNum
-  let sqlMercCd = HDBC.toSql $ snMercCd salesNum
-  let sqlQuantity = HDBC.toSql $ snQuantity salesNum
-  HDBC.run conn "insert into wk_sales_num01 values(?, ?, ?, ?, ?)"
-    [sqlDeliveryDate, sqlCustomerCd, sqlStoreCd, sqlMercCd, sqlQuantity]
+コマンドライン引数処理
 -}
+handleArgs :: IO (Cal.Day, Cal.Day)
+handleArgs = do
+  args <- SysEnv.getArgs
+  if 2 > (length args)
+    then do
+      print "usage: ins_sales_num02 fromYYYYMMDD toYYYYMMDD"
+      SysExit.exitWith $ SysExit.ExitFailure 9
+    else return ()
+  let dtFrom = MyM1.convN8ToDay $ read $ head args :: Cal.Day
+  let dtTo = MyM1.convN8ToDay $ read $ args !! 1 :: Cal.Day
+  print (dtFrom, dtTo) 
+  let dtFrom2 = MyM1.getThisMonday dtFrom
+  let dtTo2 = MyM1.getNextSunday dtTo
+  if dtFrom2 /= dtFrom || dtTo2 /= dtTo
+    then print $ "target period start: " ++ (show dtFrom) ++ "->" ++ (show dtFrom2) ++ ", end: " ++ (show dtTo) ++ "->" ++ (show dtTo2)
+    else print $ "target period " ++ (show dtFrom2) ++ ", " ++ (show dtTo2)
+  return (dtFrom2, dtTo2)
 
-
-main = do
-  conn <- PgHDBC.connectPostgreSQL "host='localhost' dbname='user01db' user='user01' password='user01'"
-  res <- HDBC.quickQuery conn (
-    "select " ++
-    "    sn1.delivery_date_n, sn1.customer_cd, " ++
-    "    sn1.store_cd, sn1.merc_cd, sn1.quantity, " ++
-    "    dt.date_num, dt.week_num, dt.day_of_week " ++
-    "from t_sales_num01 sn1" ++
-    "    inner join t_date dt " ++
-    "        on sn1.delivery_date_n = dt.date_n8 " ++
-    "where merc_cd=105617 and customer_cd=941 " ++
-    "order by sn1.customer_cd, sn1.store_cd, sn1.merc_cd, sn1.delivery_date_n ") []
-  --print res
-  let r1 = head res
-  let r2 = head $ tail res
-  print "---"
-  print r1
-  print r2
-  print "---"
-  let tpl1 = MyM1.fromSql2Tpl r1
-  --let tpl2 = MyM1.fromSql2Tpl r2
-  print tpl1
-  --print tpl2
-  print "---"
-  let snw1 = MyM1.fromTpl2SNW tpl1
-  let snw2 = MyM1.fromSql2SNW r2
-  print snw1
-  print snw2
-  print "---"
-  print (MyM1.isSameGroup01 snw1 snw2)
-  print "---"
-  let res20 = take 20 res
-  -- print res20
-  -- print "---"
-  let snws20 = map MyM1.fromSql2SNW res20
-  print snws20
-  let (pa1, pa2) = span (MyM1.isSameGroup01 snw1) snws20
-  print pa1
-  print "---"
-  {-
-  let snwgs = MyM1.splitGroup01 [] snws20
-  let snwgs1 = head snwgs
-  let snwgs2 = head $ tail snwgs
-  print snwgs1
-  print snwgs2
-  print "---"
-  print $ MyM1.mergeSNW snw1 snw2
-  print "---"
-  print $ MyM1.accumSNW snwgs1
-  print $ MyM1.accumSNW snwgs2
-  print "---"
-  -}
+selInsOneWeek :: PgHDBC.Connection -> Cal.Day -> IO Integer
+selInsOneWeek conn dtMonday = do
+  res <- MyM1.getSalesNumOneWeek conn dtMonday
+  
+  print $ (show dtMonday) ++ ", count=" ++ (show $ length res)
   let snws = map MyM1.fromSql2SNW res
   let snwgs = MyM1.splitGroup01 [] snws
   let snws2 = map MyM1.accumSNW snwgs
-  print snws2
-  print "---"
-  -- print $ MyM1.dateNum2N8 (58419 :: Int)
-  -- print $ MyM1.snwDlvDateMonN8 snw1
-  --MyM1.insTSalesNumWeek conn snw1
-  d <- mapM (MyM1.insTSalesNumWeek conn) snws2 -- use mapM if function is Action(IO Monad)
-  print d
-  HDBC.commit conn
+  cnt <- batchInsTSNW conn snws2
+  putStrLn ""
+  return cnt
+
+main = do
+  (dtFrom, dtTo) <- handleArgs
+  conn <- PgHDBC.connectPostgreSQL "host='localhost' dbname='user01db' user='user01' password='user01'"
+  let dtMondays = MyM1.genMondayList dtFrom dtTo
+  print dtMondays
+  d <- mapM (selInsOneWeek conn) dtMondays -- use mapM if function is Action(IO Monad)
+  --SysExit.exitSuccess
+  -- res <- MyM1.getSalesNumFromDb conn 20170101 20170110
+  -- res <- MyM1.getSalesNumOneWeek conn dtFrom
+  -- print $ "count=" ++ (show $ length res)
+  -- print "---"
+  -- let res20 = take 20 res
+  -- -- print res20
+  -- -- print "---"
+  -- let snws = map MyM1.fromSql2SNW res
+  -- let snwgs = MyM1.splitGroup01 [] snws
+  -- let snws2 = map MyM1.accumSNW snwgs
+  -- -- print snws2
+  -- print "---"
+  -- --d <- mapM (MyM1.insTSalesNumWeek conn) snws2 -- use mapM if function is Action(IO Monad)
+  -- --print $ sum d
+  -- -- HDBC.commit conn
+  -- batchInsTSNW conn snws2
   HDBC.disconnect conn
 
-  {-
-  fileContents <- readFile "result2.csv"
-  let lineData = tail $ lines fileContents
-  let f1 = (map remove2Quote) . splitComma
-  let lineData2 = map f1 lineData
-  -- print lineData2
-  let salesNums = map getSalesNum $ lineData2
-  -- print "---"
-  --print salesNums
-  -}
-  -- insRecord conn sn1
   

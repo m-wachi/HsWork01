@@ -4,6 +4,7 @@ import qualified Database.HDBC as HDBC
 import qualified Database.HDBC.PostgreSQL as PgHDBC
 import qualified Data.Time.Calendar as Cal
 import qualified Data.Time.Calendar.WeekDate as CalWD -- package time-1.6.0.1
+import qualified Data.List as DL
 
 
 data SalesNum = SalesNum {
@@ -31,6 +32,39 @@ data SalesNumWeek = SalesNumWeek {
   } deriving (Show)
 
 
+isExtCsv :: [Char] -> Bool
+isExtCsv fileName = ".csv" `DL.isSuffixOf` fileName
+
+splitComma :: String -> [String]
+splitComma "" = [""]
+splitComma s
+  | b == "" = [a]
+  | otherwise = a : (splitComma $ tail b)
+  where
+    (a, b) = break (== ',') s
+
+remove2Quote :: String -> String
+remove2Quote cs = 
+    if '"' == (last cs2) then init cs2 else cs2
+  where
+    cs2 = if '"' == head cs then tail cs else cs
+
+-- Cal.Day -> YYYYMMDD
+convDay2N8 :: Cal.Day -> Int
+convDay2N8 dayVal =
+    ((fromIntegral y) * 10000) + m * 100 + d
+  where
+    (y, m, d) = Cal.toGregorian dayVal
+
+-- YYYYMMDD -> Cal.Day 変換
+convN8ToDay :: Int -> Cal.Day
+convN8ToDay dateN8 = Cal.fromGregorian iYear iMonth iDay
+  where
+    sDate = show dateN8
+    iYear = read $ take 4 sDate :: Integer
+    iMonth = read $ take 2 $ drop 4 sDate :: Int
+    iDay = read $ drop 6 sDate :: Int
+
 {-
   Convert Julian day to YYYYMMDD
 -}
@@ -39,6 +73,48 @@ dateNum2N8 dateNum
   = ((fromIntegral y) * 10000) + (m * 100) + d
   where
     (y, m, d) = Cal.toGregorian $ Cal.ModifiedJulianDay $ fromIntegral dateNum
+
+
+-- 当週の月曜日を取得
+getThisMonday :: Cal.Day -> Cal.Day
+getThisMonday dayVal = Cal.addDays (fromIntegral $ 1 - dow) dayVal
+  where
+    (_, _, dow) = CalWD.toWeekDate dayVal
+
+-- 次の日曜日を取得
+getNextSunday :: Cal.Day -> Cal.Day
+getNextSunday dayVal = Cal.addDays (fromIntegral $ 1 - dow + 6) dayVal
+  where
+    (_, _, dow) = CalWD.toWeekDate dayVal
+
+{-
+  from toの期間で月曜日のリストを生成
+-}
+genMondayList :: Cal.Day -> Cal.Day -> [Cal.Day]
+genMondayList from to =
+  takeWhile (<= to) $ iterate (Cal.addDays 7) from
+
+
+
+
+getSalesNum :: [String] -> SalesNum
+getSalesNum [sDeliveryDate, sCustomerCode, sStoreCd, sMercCd, sQuantity] =
+  SalesNum (read sDeliveryDate) (read sCustomerCode) (read sStoreCd) (read sMercCd) (read sQuantity)
+
+getSalesNumFromCsvRec = getSalesNum . (map remove2Quote) . splitComma
+
+{-
+  insert SalesNum into wk_sales_num01
+-}
+insTSalesNum :: PgHDBC.Connection -> SalesNum -> IO Integer
+insTSalesNum conn salesNum = do
+  let sqlDeliveryDate = HDBC.toSql $ snDeliveryDate salesNum
+  let sqlCustomerCd = HDBC.toSql $ snCustomerCode salesNum
+  let sqlStoreCd = HDBC.toSql $ snStoreCd salesNum
+  let sqlMercCd = HDBC.toSql $ snMercCd salesNum
+  let sqlQuantity = HDBC.toSql $ snQuantity salesNum
+  HDBC.run conn "insert into wk_sales_num01 values(?, ?, ?, ?, ?)"
+    [sqlDeliveryDate, sqlCustomerCd, sqlStoreCd, sqlMercCd, sqlQuantity]
 
 
 {-
@@ -87,6 +163,7 @@ isSameGroup01 snw1 snw2
   月曜日付値、得意先コード、店舗コード、商品コードでグルーピング
 -}
 splitGroup01 :: [[SalesNumWeek]] -> [SalesNumWeek] -> [[SalesNumWeek]]
+splitGroup01 acc [] = acc
 splitGroup01 acc snws
   = if null a1
     then acc
@@ -114,7 +191,9 @@ mergeSNW snw1 snw2
     
 
 accumSNW :: [SalesNumWeek] -> SalesNumWeek
-accumSNW snws = foldr mergeSNW (head snws) $ tail snws
+accumSNW [] = error "accumSNW parameter is empty list."
+accumSNW snws = DL.foldl' mergeSNW (head snws) $ tail snws
+-- accumSNW snws = foldr mergeSNW (head snws) $ tail snws
 
 insTSalesNumWeek :: PgHDBC.Connection -> SalesNumWeek -> IO Integer
 insTSalesNumWeek conn salesNumWeek = do
@@ -133,3 +212,32 @@ insTSalesNumWeek conn salesNumWeek = do
     [sqlDlvDateNMon, sqlCustomerCd, sqlStoreCd, sqlMercCd,
      sqlQtyMon, sqlQtyTue, sqlQtyWed, sqlQtyThu, sqlQtyFri, sqlQtySat, sqlQtySun]
 
+{-
+  t_sales_num01より出荷日の範囲を指定してデータ取得
+-}
+getSalesNumFromDb :: PgHDBC.Connection -> Int -> Int -> IO [[HDBC.SqlValue]]
+getSalesNumFromDb conn from to = do
+  let sqlFrom = HDBC.toSql from
+  let sqlTo = HDBC.toSql to
+
+  res <- HDBC.quickQuery conn (
+    "select " ++
+    "    sn1.delivery_date_n, sn1.customer_cd, " ++
+    "    sn1.store_cd, sn1.merc_cd, sn1.quantity, " ++
+    "    dt.date_num, dt.week_num, dt.day_of_week " ++
+    "from t_sales_num01 sn1" ++
+    "    inner join t_date dt " ++
+    "        on sn1.delivery_date_n = dt.date_n8 " ++
+    "where sn1.delivery_date_n between ? and ? " ++
+    "order by sn1.customer_cd, sn1.store_cd, sn1.merc_cd, sn1.delivery_date_n ")
+    [sqlFrom, sqlTo]
+  return res
+
+{-
+  指定された日から7日間のt_sales_num01のデータを取得
+-}
+getSalesNumOneWeek :: PgHDBC.Connection -> Cal.Day -> IO [[HDBC.SqlValue]]
+getSalesNumOneWeek conn dtFrom = do
+  let iFrom = convDay2N8 dtFrom
+  let iTo = convDay2N8 $ Cal.addDays 6 dtFrom
+  getSalesNumFromDb conn iFrom iTo
